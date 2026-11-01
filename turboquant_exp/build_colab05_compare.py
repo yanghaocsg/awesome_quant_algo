@@ -26,20 +26,24 @@ for _f in ("Noto Sans CJK SC", "WenQuanYi Zen Hei", "Microsoft YaHei", "SimHei")
 matplotlib.rcParams["axes.unicode_minus"] = False
 print("torch", torch.__version__, "| mpl", matplotlib.__version__)
 # ===== 系列冒烟/实测关键数值（同口径状态 MAE）=====
-labels = ["P1 错误累积\n(per-step vs win16)", "P1 极端错误点\n(clean vs outlier)", "P2 共享状态流\n(TQ vs LQ)"]
+labels = ["P1 量化频率", "P1 极端错误点", "P2 共享状态流"]
+subs = ["TQ per-step\nvs every-16", "TQ clean\nvs outlier", "TQ per-step\nvs LQ window"]
 tq_vals = [3.917e-3, 9.411e-3, 2.234e-4]
 lq_vals = [1.125e-3, 7.516e-2, 2.692e-5]
-# 注：P1 第二列 outlier 场景两者都放大，展示 LQ 平滑 scale 相对优势
+# 组1：同一 TQ 量化器，每步 vs 每16步（错误累积与量化频率，3.5x）
+# 组2：同一 8-bit absmax 量化器，单一极端坐标拉爆全局 scale（8.0x，问题②）
+# 组3：TQ 每步量化 vs LQ 逐窗口压缩（8.3x，问题①②的 fix）
 x = range(len(labels))
-plt.figure(figsize=(9, 4.5))
+plt.figure(figsize=(9, 4.8))
 w = 0.32
-plt.bar([i - w/2 for i in x], tq_vals, width=w, label="TurboQuant (per-step)")
-plt.bar([i + w/2 for i in x], lq_vals, width=w, label="LeapQuant (windowed)")
-plt.yscale("log"); plt.xticks(list(x), labels, fontsize=9)
-plt.ylabel("state MAE (log)"); plt.title("状态量化误差对比：LeapQuant 逐窗口压缩 vs TurboQuant 每步量化")
-plt.legend(); plt.grid(True, which="both", alpha=0.3); plt.tight_layout(); plt.show()
-ratios = [t / max(l, 1e-30) for t, l in zip(tq_vals, lq_vals)]
-print("ratio TQ/LQ:", [f"{r:.1f}x" for r in ratios])'''
+plt.bar([i - w/2 for i in x], tq_vals, width=w, label="TurboQuant 相关", color="tab:red")
+plt.bar([i + w/2 for i in x], lq_vals, width=w, label="对比对象（每16步 / outlier / LeapQuant）", color="tab:blue")
+plt.yscale("log"); plt.xticks(list(x), [f"{a}\n{b}" for a, b in zip(labels, subs)], fontsize=8)
+plt.ylabel("state MAE (log)"); plt.title("状态量化误差对比（三组同口径，组2 为同一 TQ 量化器的 clean vs outlier）")
+plt.legend(fontsize=8); plt.grid(True, which="both", alpha=0.3); plt.tight_layout(); plt.show()
+print("组1 TQ per-step/every16 =", f"{tq_vals[0]/lq_vals[0]:.1f}x worse")
+print("组2 outlier vs clean (TQ) =", f"{lq_vals[1]/tq_vals[1]:.1f}x worse")
+print("组3 LQ vs TQ =", f"{tq_vals[2]/lq_vals[2]:.1f}x lower")'''
 
 CODE2 = r'''# ===== 论文 Table 1（8-bit，用户提供）：LeapQuant / TurboQuant 逐基准 =====
 benchs = ["AIME", "GPQA", "LCB", "MMLU"]
