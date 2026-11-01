@@ -1,0 +1,7 @@
+# Install the CUDA 13.0 PyTorch wheel first; see README.md.
+torch==2.12.1
+nvidia-cutlass-dsl[cu13]==4.6.0
+cuda-bindings==13.3.1
+kernels==0.17.2
+huggingface-hub==2.2.0
+tilelang==0.1.12

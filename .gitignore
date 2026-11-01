@@ -1,0 +1,7 @@
+# Temporary Colab screenshots / working evidence (not part of the repo)
+torch_port/
+
+# Python
+__pycache__/
+*.pyc
+*.ipynb_checkpoints/

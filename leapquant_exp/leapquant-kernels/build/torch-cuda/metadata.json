@@ -1,0 +1,25 @@
+{
+  "name": "leapquant",
+  "id": "_humanfia_leapquant_cuda_6215db1dd13a6d5f",
+  "version": 1,
+  "license": "Apache-2.0",
+  "python-depends": [
+    "nvidia-cutlass-dsl"
+  ],
+  "kernel-depends": [],
+  "backend": {
+    "type": "cuda",
+    "archs": [
+      "10.3"
+    ]
+  },
+  "digest": {
+    "algorithm": "sha256",
+    "files": {
+      "LICENSE.txt": "z8d0m5b2O9McPEK1xHG/dWgUBT6EfBDz6wA0F7xSPTA=",
+      "__init__.py": "Apnx4rqE5UnXv9sg1yYjFyffJd+jA3bmk4YTnMYAI34=",
+      "_gdn.py": "pzS1nnWoyOhw1oKAxZxP4F6ePSM0xNfmLXEBxnyc2bY=",
+      "_kda.py": "L2NYlrcNE939doItcR91yMOrtGBvDM0l3QS1g7lbfsY="
+    }
+  }
+}

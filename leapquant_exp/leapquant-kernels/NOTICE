@@ -1,0 +1,7 @@
+LeapQuant checkpoint flush kernels
+
+Kernel sources and upstream request files retain their Apache-2.0 SPDX notices.
+Request definition, workloads, reference baseline and benchmark originate from
+https://github.com/NVlabs/kda/pull/10 at commit 48f02e6ba0e98a1841ab6f0a2d99a90b2de1a326.
+The CuTe DSL implementation was evolved with Kernel Design Agents using
+GPT 6.1 and Claude Opus 5.5 in a 48-hour experiment.
