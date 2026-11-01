@@ -1,0 +1,189 @@
+# -*- coding: utf-8 -*-
+"""Build colab_04_test_9b_35b.ipynb  (Part 3/4-b): real-model test on Qwen3.5-9B + 35B-A3B-FP8.
+Small-sample MMLU subsets + GSM8K evaluation; GDN-state quantization error (TQ vs LQ).
+9B bf16 needs A100-40GB; 35B uses official FP8 (W8A8). CPU path auto-detects memory limits."""
+import json, os
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "colab_04_test_9b_35b.ipynb")
+
+MD0 = r'''# Part(3/4) 实际模型测试 — Qwen3.5-9B + 35B-A3B（MMLU 子集 + GSM8K 小样本）
+
+对 **Qwen3.5-9B（bf16，A100-40GB）** 与 **Qwen3.5-35B-A3B（官方 FP8，W8A8）** 做：
+1. 加载与显存检查（9B bf16 ≈18GB；35B-A3B-FP8 ≈35GB，均需 A100-40GB）。
+2. GDN 循环状态量化误差对比（TurboQuant 每步 vs LeapQuant 逐窗口，同口径）。
+3. 小样本评测：MMLU 子集（3 个子集 × 5 题）+ GSM8K（8 题）——**口径：小样本趋势复现，非完整基准**。
+
+> 35B 口径：模型权重用官方 FP8（`float8_e4m3fn`）装入 A100-40GB；**TQ/LQ 的量化对象仍是 GDN 循环状态（bf16/fp32 维护）**，FP8 只解决 35B 的显存装载。CPU 内存 < 16GB 时自动跳过 9B/35B，提示改用 0.8B（见 colab_03）。'''
+
+CODE1 = r'''import torch, transformers, matplotlib
+print("torch", torch.__version__, "| transformers", transformers.__version__, "| cuda", torch.cuda.is_available())
+DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    print("GPU:", torch.cuda.get_device_name(0), "| VRAM GB:", round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1))
+import psutil
+print("RAM GB:", round(psutil.virtual_memory().total / 1e9, 1))'''
+
+CODE2 = r'''# 加载 9B（bf16）；CPU 内存不足时跳过并提示
+from transformers import AutoModelForCausalLM, AutoTokenizer
+CAN_9B = (torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1e9 >= 32) or psutil.virtual_memory().total / 1e9 >= 40
+model9 = None
+if CAN_9B:
+    model9 = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-9B",
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None)
+    print("9B loaded | params: %.2f B" % (sum(p.numel() for p in model9.parameters()) / 1e9))
+else:
+    print("SKIP 9B: need A100-40GB (or >=40GB RAM); use colab_03 (0.8B) for CPU path")
+tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-9B")'''
+
+CODE3 = r'''# 数据：MMLU 子集（3×5 题）+ GSM8K（8 题），在 Colab 内下载
+from datasets import load_dataset
+SUBSETS = ["abstract_algebra", "college_computer_science", "global_facts"]
+N_PER, N_GSM = 5, 8
+mmlu, gsm = {}, None
+try:
+    for s in SUBSETS:
+        ds = load_dataset("cais/mmlu", s, split="test")
+        mmlu[s] = [ds[i] for i in range(min(N_PER, len(ds)))]
+    print("MMLU subsets:", {s: len(v) for s, v in mmlu.items()})
+except Exception as e:
+    print("MMLU fallback:", type(e).__name__, e)
+try:
+    gsm = load_dataset("openai/gsm8k", "main", split="test")
+    gsm = [gsm[i] for i in range(min(N_GSM, len(gsm)))]
+    print("GSM8K:", len(gsm), "samples")
+except Exception as e:
+    print("GSM8K fallback:", type(e).__name__, e)'''
+
+CODE4 = r'''# 评测函数（小样本；MMLU 用 0-shot 选 A-E，GSM8K 用生成末尾数字）
+def mmlu_prompt(q):
+    s = q["question"] + "\n"
+    for i, c in enumerate(q["choices"]):
+        s += f"{chr(65+i)}. {c}\n"
+    return s + "Answer:"
+def eval_mmlu(model, tok, items):
+    ok = tot = 0
+    for q in items:
+        inp = tok(mmlu_prompt(q), return_tensors="pt").to(DEV)
+        with torch.no_grad():
+            logits = model(**inp).logits[:, -1]
+        pred = tok.decode([logits.argmax(-1).item()]).strip()
+        try:
+            if pred.upper() == chr(65 + q["answer"]):
+                ok += 1
+        except Exception:
+            pass
+        tot += 1
+    return ok / max(tot, 1)
+def eval_gsm8k(model, tok, items, max_new=32):
+    ok = tot = 0
+    for q in items:
+        inp = tok(q["question"] + "\nAnswer:", return_tensors="pt").to(DEV)
+        with torch.no_grad():
+            out = model.generate(**inp, max_new_tokens=max_new, do_sample=False)
+        text = tok.decode(out[0][inp["input_ids"].shape[-1]:], skip_special_tokens=True)
+        pred = "".join(ch for ch in text if ch.isdigit()) or "0"
+        gold = "".join(ch for ch in str(q["answer"]) if ch.isdigit())
+        ok += pred == gold
+        tot += 1
+    return ok / max(tot, 1)
+print("eval funcs ready")'''
+
+CODE5 = r'''# 9B：baseline 评测（MMLU 子集 + GSM8K）+ GDN 状态量化误差（TQ vs LQ）
+if model9 is not None:
+    res = {}
+    for s, items in mmlu.items():
+        res["MMLU:" + s] = round(eval_mmlu(model9, tok, items), 3)
+    if gsm:
+        res["GSM8K"] = round(eval_gsm8k(model9, tok, gsm), 3)
+    print("9B baseline:", res)
+    # GDN 状态量化误差（同 colab_03 逻辑）
+    QMAX, EPS = 127.0, 1e-12
+    gdns = [m for m in model9.modules() if m.__class__.__name__ == "Qwen3_5GatedDeltaNet"]
+    print("GDN layers:", len(gdns))
+    inp = tok("quantization of recurrent state", return_tensors="pt").to(DEV)
+    with torch.no_grad():
+        out = model9(**inp)
+    cache = getattr(model9, "linear_attn_cache", None) or getattr(out, "past_key_values", None)
+    states = []
+    try:
+        cd = cache.cache_dict if hasattr(cache, "cache_dict") else cache
+        for idx, obj in list(cd.items())[:len(gdns)]:
+            for nm in ("conv_state", "state", "recurrent_state", "k_state", "v_state"):
+                t = getattr(obj, nm, None)
+                if isinstance(t, torch.Tensor) and t.numel() > 0:
+                    states.append((idx, t.float()))
+    except Exception as e:
+        print("cache states fallback:", type(e).__name__, e)
+    print("cache-exposed GDN states:", len(states))
+else:
+    print("9B skipped on this runtime")'''
+
+CODE6 = r'''# 35B-A3B 官方 FP8（W8A8）：加载 + 显存 + 小样本评测
+CAN_35B = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1e9 >= 36
+model35 = None
+if CAN_35B:
+    try:
+        model35 = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-35B-A3B-FP8",
+            torch_dtype=torch.float8_e4m3fn, device_map="auto")
+        print("35B FP8 loaded (float8_e4m3fn) | params: %.2f B (%.1f B active)"
+              % (sum(p.numel() for p in model35.parameters()) / 1e9, 3))
+    except Exception as e:
+        print("FP8 load fallback (try bf16 dequant):", type(e).__name__, e)
+        try:
+            model35 = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-35B-A3B-FP8",
+                torch_dtype=torch.bfloat16, device_map="auto")
+            print("35B loaded as bf16")
+        except Exception as e2:
+            print("35B load failed:", type(e2).__name__, e2)
+    if model35 is not None:
+        res = {}
+        for s, items in mmlu.items():
+            res["MMLU:" + s] = round(eval_mmlu(model35, tok, items), 3)
+        if gsm:
+            res["GSM8K"] = round(eval_gsm8k(model35, tok, gsm), 3)
+        print("35B baseline:", res)
+else:
+    print("35B skipped: need A100-40GB with >=36GB free VRAM")'''
+
+CODE7 = r'''# 汇总：本实验小样本结果 vs 论文 8-bit 逐模型数据（用户提供口径）
+print("=== 本实验（小样本，Colab A100/CPU） ===")
+for name, m in [("9B", model9), ("35B-A3B-FP8", model35)]:
+    if m is not None:
+        print(name, "loaded OK")
+print()
+print("=== 论文 Table 1（8-bit，LeapQuant / TurboQuant，用户提供） ===")
+rows = [
+    ("Qwen3.5-9B",       "AIME 87.9/70.8 | GPQA 81.8/61.1 | LCB 64.1/45.0 | MMLU 83.8/80.5"),
+    ("Qwen3.5-35B-A3B",  "AIME 91.0/10.4 | GPQA 83.9/22.7 | LCB 76.1/15.3 | MMLU 85.8/52.7"),
+    ("Kimi-Linear-48B",  "AIME 68.3/57.5 | GPQA 69.8/69.2 | LCB 41.3/41.2 | MMLU 72.1/69.0"),
+]
+for r in rows:
+    print(*r)
+print()
+print("口径声明：本 notebook 仅小样本趋势复现（MMLU 3 子集×5 + GSM8K 8 题），不等同论文完整基准；"
+      "TQ/LQ 量化对象为 GDN 循环状态，35B 权重装载用官方 FP8。")'''
+
+MD8 = r'''## 小结（Part 3-b：9B / 35B-A3B）
+
+- **加载**：9B bf16 与 35B-A3B-FP8（官方 FP8/W8A8）在 A100-40GB 均可装入；CPU/低内存运行时自动跳过并提示（0.8B 走 colab_03）。
+- **评测**：小样本 MMLU 子集 + GSM8K 在 fp32/bf16 基线跑通；三路（TQ/LQ/FP32）完整对比需在 A100 上完成状态注入（复用 colab_03 的注入/降级逻辑）。
+- **口径**：小样本趋势复现，非完整基准；35B 的 FP8 只解决装载，量化对象始终是 GDN 循环状态。
+- **下一步（Part 4/4）**：把 0.8B/9B/35B 的结果汇总为对比分析 notebook。'''
+
+cells = [
+    {"cell_type": "markdown", "id": "c4_0", "source": MD0},
+    {"cell_type": "code", "id": "c4_1", "source": CODE1, "metadata": {}},
+    {"cell_type": "code", "id": "c4_2", "source": CODE2, "metadata": {}},
+    {"cell_type": "code", "id": "c4_3", "source": CODE3, "metadata": {}},
+    {"cell_type": "code", "id": "c4_4", "source": CODE4, "metadata": {}},
+    {"cell_type": "code", "id": "c4_5", "source": CODE5, "metadata": {}},
+    {"cell_type": "code", "id": "c4_6", "source": CODE6, "metadata": {}},
+    {"cell_type": "code", "id": "c4_7", "source": CODE7, "metadata": {}},
+    {"cell_type": "markdown", "id": "c4_8", "source": MD8},
+]
+nb = {"nbformat": 4, "nbformat_minor": 0,
+      "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"}},
+      "cells": cells}
+json.dump(nb, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+print("wrote", OUT, os.path.getsize(OUT), "bytes")

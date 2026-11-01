@@ -1,0 +1,4 @@
+[SMOKE-OK colab_03_test_08b/c3_1] torch 2.15.0+cpu | transformers 5.22.1 | cuda False
+running on cpu
+
+[SMOKE-OK colab_03_test_08b/c3_4] ops ready: TQ (rotation+Lloyd-Max) and LQ (compensator + smoothed int8 residual)
