@@ -1,9 +1,11 @@
-[OK c5_1] torch 2.15.0+cpu | mpl 3.11.2
-ratio TQ/LQ: ['3.5x', '0.1x', '8.3x']
+[OK ?] torch 2.15.0+cpu | mpl 3.11.2
+组1 TQ per-step/every16 = 3.5x worse
+组2 outlier vs clean (TQ) = 8.0x worse
+组3 LQ vs TQ = 8.3x lower
 
-[OK c5_2] avg per model  LQ: ['79.4', '84.2', '62.9'] | TQ: ['64.3', '25.3', '59.2']
+[OK ?] avg per model  LQ: ['79.4', '84.2', '62.9'] | TQ: ['64.3', '25.3', '59.2']
 
-[OK c5_3] TurboQuant | LeapQuant
+[OK ?] TurboQuant | LeapQuant
 量化时机 | 每 token / 每步 | 逐窗口（窗口内 bf16/fp32 缓冲）
 量化次数 | T 次 | T/L 次（L=窗口长）
 错误累积 | 逐级叠加（问题①） | 只在窗口边界进入一次
@@ -12,7 +14,7 @@ ratio TQ/LQ: ['3.5x', '0.1x', '8.3x']
 适配循环层 | 不可（KV cache 量化仅全注意力层） | GDN 循环状态逐窗口压缩
 适用硬件 | A100 等价实现（仓库内核为 B300/sm_103 专属） | 纯 torch（CPU/A100 均可）
 
-[OK c5_4] 结论
+[OK ?] 结论
 1. 问题成立：循环状态量化误差逐 token 累积（Part1 机制图 + 3.5x 频率对比）；
    单一 outlier 会把 8-bit 全局 scale 拉爆（Part1 8.0x 误差放大）。
 2. LeapQuant fix：窗口内高精度递推 + 边界一次压缩（公式1）+ 补偿 token（公式2）

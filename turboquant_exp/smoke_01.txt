@@ -1,0 +1,17 @@
+[OK] p1_1
+torch 2.15.0+cpu | cuda False | mpl 3.11.2
+running on cpu
+
+
+[OK] p1_3
+TurboQuant quantizer ready: 8-bit 256-level Lloyd-Max on rotated coords | DEV = cpu
+
+
+[OK] p1_5
+final error: per-step=3.917e-03 vs every16=1.125e-03  (3.5x worse)
+note: mechanism (a) shows the recurrence beta~1 stacks errors; (b) shows per-step stacks worst
+
+
+[OK] p1_7
+clean MAE=9.411e-03; with outlier x8 -> 7.516e-02  (8.0x worse)
+=> one extreme coordinate drags s=max|x| up, enlarging the step for every other coordinate

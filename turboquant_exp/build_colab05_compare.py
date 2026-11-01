@@ -106,13 +106,19 @@ MD5 = r'''## 附录：四部分 notebook 索引（全部含 CPU + A100 双版本
 **上游基线**：TurboQuant `github.com/0xsero/turboquant`（GPL-3.0，KV cache 量化）；LeapQuant `huggingface.co/kernels/humanfia-lab/leapquant`（GDN 循环状态压缩）。'''
 
 cells = [
-    {"cell_type": "markdown", "id": "c5_0", "source": MD0},
-    {"cell_type": "code", "id": "c5_1", "source": CODE1, "metadata": {}},
-    {"cell_type": "code", "id": "c5_2", "source": CODE2, "metadata": {}},
-    {"cell_type": "code", "id": "c5_3", "source": CODE3, "metadata": {}},
-    {"cell_type": "code", "id": "c5_4", "source": CODE4, "metadata": {}},
-    {"cell_type": "markdown", "id": "c5_5", "source": MD5},
+    {"cell_type": "markdown", "source": MD0, "metadata": {"id": "c5_0"}},
+    {"cell_type": "code", "source": CODE1, "metadata": {"id": "c5_1"}},
+    {"cell_type": "code", "source": CODE2, "metadata": {"id": "c5_2"}},
+    {"cell_type": "code", "source": CODE3, "metadata": {"id": "c5_3"}},
+    {"cell_type": "code", "source": CODE4, "metadata": {"id": "c5_4"}},
+    {"cell_type": "markdown", "source": MD5, "metadata": {"id": "c5_5"}},
 ]
+for _c in cells:
+    _c.setdefault("metadata", {})
+    if _c["cell_type"] == "code":
+        _c.setdefault("outputs", [])
+        _c.setdefault("execution_count", None)
+
 nb = {"nbformat": 4, "nbformat_minor": 0,
       "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"}},
       "cells": cells}

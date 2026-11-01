@@ -207,15 +207,21 @@ MD7 = r'''## 小结（Part 3-a：0.8B）
 - **下一步（Part 3-b）**：同口径测试 **9B（bf16，A100-40GB）** 与 **35B-A3B（官方 FP8，W8A8）**，并加 MMLU 子集 + GSM8K 小样本评测。'''
 
 cells = [
-    {"cell_type": "markdown", "id": "c3_0", "source": MD0},
-    {"cell_type": "code", "id": "c3_1", "source": CODE1, "metadata": {}},
-    {"cell_type": "code", "id": "c3_2", "source": CODE2, "metadata": {}},
-    {"cell_type": "code", "id": "c3_3", "source": CODE3, "metadata": {}},
-    {"cell_type": "code", "id": "c3_4", "source": CODE4, "metadata": {}},
-    {"cell_type": "code", "id": "c3_5", "source": CODE5, "metadata": {}},
-    {"cell_type": "code", "id": "c3_6", "source": CODE6, "metadata": {}},
-    {"cell_type": "markdown", "id": "c3_7", "source": MD7},
+    {"cell_type": "markdown", "source": MD0, "metadata": {"id": "c3_0"}},
+    {"cell_type": "code", "source": CODE1, "metadata": {"id": "c3_1"}},
+    {"cell_type": "code", "source": CODE2, "metadata": {"id": "c3_2"}},
+    {"cell_type": "code", "source": CODE3, "metadata": {"id": "c3_3"}},
+    {"cell_type": "code", "source": CODE4, "metadata": {"id": "c3_4"}},
+    {"cell_type": "code", "source": CODE5, "metadata": {"id": "c3_5"}},
+    {"cell_type": "code", "source": CODE6, "metadata": {"id": "c3_6"}},
+    {"cell_type": "markdown", "source": MD7, "metadata": {"id": "c3_7"}},
 ]
+for _c in cells:
+    _c.setdefault("metadata", {})
+    if _c["cell_type"] == "code":
+        _c.setdefault("outputs", [])
+        _c.setdefault("execution_count", None)
+
 nb = {"nbformat": 4, "nbformat_minor": 0,
       "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"}},
       "cells": cells}

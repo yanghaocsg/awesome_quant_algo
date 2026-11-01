@@ -172,16 +172,22 @@ MD8 = r'''## 小结（Part 3-b：9B / 35B-A3B）
 - **下一步（Part 4/4）**：把 0.8B/9B/35B 的结果汇总为对比分析 notebook。'''
 
 cells = [
-    {"cell_type": "markdown", "id": "c4_0", "source": MD0},
-    {"cell_type": "code", "id": "c4_1", "source": CODE1, "metadata": {}},
-    {"cell_type": "code", "id": "c4_2", "source": CODE2, "metadata": {}},
-    {"cell_type": "code", "id": "c4_3", "source": CODE3, "metadata": {}},
-    {"cell_type": "code", "id": "c4_4", "source": CODE4, "metadata": {}},
-    {"cell_type": "code", "id": "c4_5", "source": CODE5, "metadata": {}},
-    {"cell_type": "code", "id": "c4_6", "source": CODE6, "metadata": {}},
-    {"cell_type": "code", "id": "c4_7", "source": CODE7, "metadata": {}},
-    {"cell_type": "markdown", "id": "c4_8", "source": MD8},
+    {"cell_type": "markdown", "source": MD0, "metadata": {"id": "c4_0"}},
+    {"cell_type": "code", "source": CODE1, "metadata": {"id": "c4_1"}},
+    {"cell_type": "code", "source": CODE2, "metadata": {"id": "c4_2"}},
+    {"cell_type": "code", "source": CODE3, "metadata": {"id": "c4_3"}},
+    {"cell_type": "code", "source": CODE4, "metadata": {"id": "c4_4"}},
+    {"cell_type": "code", "source": CODE5, "metadata": {"id": "c4_5"}},
+    {"cell_type": "code", "source": CODE6, "metadata": {"id": "c4_6"}},
+    {"cell_type": "code", "source": CODE7, "metadata": {"id": "c4_7"}},
+    {"cell_type": "markdown", "source": MD8, "metadata": {"id": "c4_8"}},
 ]
+for _c in cells:
+    _c.setdefault("metadata", {})
+    if _c["cell_type"] == "code":
+        _c.setdefault("outputs", [])
+        _c.setdefault("execution_count", None)
+
 nb = {"nbformat": 4, "nbformat_minor": 0,
       "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"}},
       "cells": cells}

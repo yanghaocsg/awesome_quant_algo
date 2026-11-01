@@ -1,0 +1,22 @@
+[OK] c2_1
+torch 2.15.0+cpu | cuda False | mpl 3.11.2
+running on cpu
+
+
+[OK] c2_3
+formula 1 ready: window buffered in fp32, state rebuilt once at flush
+
+
+[OK] c2_5
+formula 2 ready: R compensator tokens capture top-R subspace
+
+
+[OK] c2_7
+formula 3 ready: smoothed per-row/per-col scales localize outliers
+
+
+[OK] c2_9
+TurboQuant per-step final err = 2.234e-04
+LeapQuant windowed final err  = 2.692e-05
+=> LeapQuant 8.3x lower at stream end
+=> fewer quantizations (T/L) + compensator tokens + smoothed residual scales solve both problems

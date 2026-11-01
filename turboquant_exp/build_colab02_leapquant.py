@@ -184,18 +184,24 @@ MD10 = r'''## 小结
 - **下一步（Part 3/4）**：把这套逐窗口压缩真实作用到 Qwen3.5（0.8B/9B/35B-A3B）的 Gated-DeltaNet 循环状态上做实测。'''
 
 cells = [
-    {"cell_type": "markdown", "id": "c2_0", "source": MD0},
-    {"cell_type": "code", "id": "c2_1", "source": CODE1, "metadata": {}},
-    {"cell_type": "markdown", "id": "c2_2", "source": MD2},
-    {"cell_type": "code", "id": "c2_3", "source": CODE3, "metadata": {}},
-    {"cell_type": "markdown", "id": "c2_4", "source": MD4},
-    {"cell_type": "code", "id": "c2_5", "source": CODE5, "metadata": {}},
-    {"cell_type": "markdown", "id": "c2_6", "source": MD6},
-    {"cell_type": "code", "id": "c2_7", "source": CODE7, "metadata": {}},
-    {"cell_type": "markdown", "id": "c2_8", "source": MD8},
-    {"cell_type": "code", "id": "c2_9", "source": CODE9, "metadata": {}},
-    {"cell_type": "markdown", "id": "c2_10", "source": MD10},
+    {"cell_type": "markdown", "source": MD0, "metadata": {"id": "c2_0"}},
+    {"cell_type": "code", "source": CODE1, "metadata": {"id": "c2_1"}},
+    {"cell_type": "markdown", "source": MD2, "metadata": {"id": "c2_2"}},
+    {"cell_type": "code", "source": CODE3, "metadata": {"id": "c2_3"}},
+    {"cell_type": "markdown", "source": MD4, "metadata": {"id": "c2_4"}},
+    {"cell_type": "code", "source": CODE5, "metadata": {"id": "c2_5"}},
+    {"cell_type": "markdown", "source": MD6, "metadata": {"id": "c2_6"}},
+    {"cell_type": "code", "source": CODE7, "metadata": {"id": "c2_7"}},
+    {"cell_type": "markdown", "source": MD8, "metadata": {"id": "c2_8"}},
+    {"cell_type": "code", "source": CODE9, "metadata": {"id": "c2_9"}},
+    {"cell_type": "markdown", "source": MD10, "metadata": {"id": "c2_10"}},
 ]
+for _c in cells:
+    _c.setdefault("metadata", {})
+    if _c["cell_type"] == "code":
+        _c.setdefault("outputs", [])
+        _c.setdefault("execution_count", None)
+
 nb = {"nbformat": 4, "nbformat_minor": 0,
       "metadata": {"kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"}},
       "cells": cells}
