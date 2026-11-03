@@ -10,6 +10,7 @@
 
 | 部分 | 交付 Colab | 主题 | 运行时版本 |
 |---|---|---|---|
+| (0) 基线 | `colab_01_0_kv_lossless.ipynb` | **前置基线**：TurboQuant 在原生对象（attention KV cache）上接近无损 —— Qwen3.5-0.8B 真实模型 + 真实 `turboquant-vllm-npu` 包实测（逐层余弦 ≥0.99 / 生成一致 / 3.76× 压缩） | CPU + A100 |
 | (1) 问题 | `colab_01_problem.ipynb` | 循环网络状态量化为何难（错误累积 + 极端错误点），用 TurboQuant 说明 | CPU + A100 |
 | (2) 方法 | `colab_02_leapquant.ipynb` | LeapQuant 如何解决（≥3 公式 + fix），对比 TurboQuant | CPU + A100 |
 | (3) 实测 | `colab_03_test_08b.ipynb` + `colab_04_test_9b_35b.ipynb` | TurboQuant / LeapQuant 在 Qwen3.5-0.8B、9B、35B-A3B 实测 | CPU + A100 |
@@ -36,6 +37,7 @@
 
 **实现基础**
 - TurboQuant：`github.com/0xsero/turboquant`（ICLR 2026, arXiv:2504.19874）。提供 `rotation.py`（随机正交旋转 + QJL）、`codebook.py`（Lloyd-Max for Beta）、`quantizer.py`（TurboQuantMSE/Prod）。**注意**：该仓库量化对象是 attention 层 KV cache，**不直接处理 GDN 循环状态**；我们**复用其量化算子（旋转 + Lloyd-Max）**，把对象改为 GDN 循环状态（等价于我们已有的 `TURBO_CODE` 每步量化）。
+- turboquant-vllm-npu 包（PyPI 可装；本地参考 `D:\gitcode_2026\turboquant-vllm-npu`，fork 自 `Alberto-Codes/turboquant-vllm`）：提供 `CompressedDynamicCache`（WHT 旋转 + Lloyd-Max + nibble 打包；4bit 时 68 vs 256 B/token/head ≈ **3.76×**；`verify` CLI 的质量阈值为逐层余弦 ≥0.99）。**仅供 `colab_01_0` 固定「KV cache 近无损」基线**，反衬 GDN 状态的误差累积；系列主线仍用自包含算子作用于 GDN 状态。
 - LeapQuant：复用 `torch_port/gdn_torch.py`（GDN 窗口边界量化忠实移植：重建 + 补偿 + 平滑）。论文状态语义 S = β·S + w·v·kᵀ。
 - transformers 5.22.1 **原生支持 Qwen3.5**（model_type=qwen3_5，含 `Qwen3_5GatedDeltaNet` 层）；`past_key_values` 为 `DynamicCache`，GDN 状态经 cache 暴露（可替换性在 `qwen35_state_probe.ipynb` 确认中）。
 
@@ -46,6 +48,18 @@
 ---
 
 ## 2. 各部分详细规划
+
+### Part (0) KV cache 近无损基线 — `colab_01_0_kv_lossless.ipynb`（已生成）
+
+**内容**：在进入「GDN 状态量化难」之前，先固定相反方向的事实 —— TurboQuant 在其**原生对象**（attention 层 KV cache）上量化+压缩**接近无损**。与 `colab_01_problem` §1 的合成数据证明互补，本篇用**真实包 + 真实模型**：
+
+1. **数值层**：Qwen3.5-0.8B 真实文本 prefill，`CompressedDynamicCache`（K4/V4、K4/V3）vs 未压缩 `DynamicCache` 的逐层 K/V 余弦相似度，阈值 0.99（与包内 `verify` CLI 同口径）；只统计 full-attention 层（GDN 层无 KV，自动跳过）。
+2. **生成层**：同一 prompt 贪心解码（压缩全程激活），对比 bf16 基线 token 级一致率。
+3. **存储层**：`vram_bytes()` 压缩字节 vs FP16 理论字节，序列长度扫描（CPU 128-512 / A100 256-4096），验证 K4/V4 ≈ 3.76×（68 vs 256 B/token/head）、K4/V3 ≈ 2.56×。
+
+**叙事作用**：KV cache 只写一次、只读不递归 → 量化误差不随步累积；GDN 状态 `S_t = β_t·S_{t-1} + w_t·v_t·k_tᵀ` 每步读写 → 同一算子误差递归累积（Part 1 的两个问题）。这一对照正是系列立论的起点。
+
+**Colab 结构**：环境（`pip install turboquant-vllm-npu`，transformers ≥5.22）→ 模型与结构信息（full-attn/GDN 层数、head_dim、kv_heads）→ 机制速览 → 逐层余弦 + 图 → 生成对比 → 存储扫描 + 图 → 小结。CPU 冒烟 / A100 完整（`DEV` + `FULL` 开关）。
 
 ### Part (1) 循环状态量化的问题 — `colab_01_problem.ipynb`
 
@@ -114,6 +128,8 @@
 ```
 qwen35_state_probe.ipynb   (已就绪，确认 DynamicCache 状态可替换性 —— 前置门)
    ↓
+colab_01_0_kv_lossless   (Part 0 基线：真实包+真实模型证明 KV 近无损 —— 已生成)
+   ↓
 colab_01_problem → colab_02_leapquant   (方法演示，可本地 CPU 冒烟)
    ↓
 colab_03_test_08b → colab_04_test_9b_35b   (A100 实跑)
@@ -145,6 +161,7 @@ colab_05_compare   (汇总)
 | 文件 | 说明 |
 |---|---|
 | `qwen35_state_probe.ipynb` | 状态接口确认（已上传 Colab，待跑） |
+| `colab_01_0_kv_lossless.ipynb` | **Part(0) 基线**：TurboQuant KV cache 近无损（0.8B 真实包实测；由 `build_colab01_0_kv_lossless.py` 生成） |
 | `colab_01_problem.ipynb` | Part(1) 问题演示 |
 | `colab_02_leapquant.ipynb` | Part(2) 方法 + 公式 |
 | `colab_03_test_08b.ipynb` | Part(3) 0.8B 实测 |
