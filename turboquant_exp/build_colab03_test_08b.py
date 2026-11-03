@@ -18,6 +18,18 @@ MD0 = r'''# Part(3/4) 实际模型测试 — Qwen3.5-0.8B（Gated-DeltaNet 循�
 
 > 注：GDN 循环状态经 `DynamicCache` 暴露的接口因 transformers 版本而异，本 notebook 采用**自适应注入 + 自动降级**：能找到 cache 内状态张量则直接量化注入；否则用 forward hook 捕获层间激活作为状态代理做同口径对比。'''
 
+NETCODE = r'''# 网络：AutoDL 等国内环境无法直连 HuggingFace，自动检测并切换镜像（Colab 直连不受影响）
+import os, socket
+def _hf_reachable(host="huggingface.co", port=443, timeout=3):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+if not _hf_reachable():
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+print("HF_ENDPOINT =", os.environ.get("HF_ENDPOINT", "https://huggingface.co (direct)"))'''
+
 CODE1 = r'''import torch, transformers, matplotlib
 print("torch", torch.__version__, "| transformers", transformers.__version__, "| cuda", torch.cuda.is_available())
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -208,6 +220,7 @@ MD7 = r'''## 小结（Part 3-a：0.8B）
 
 cells = [
     {"cell_type": "markdown", "source": MD0, "metadata": {"id": "c3_0"}},
+    {"cell_type": "code", "source": NETCODE, "metadata": {"id": "c3_0net"}},
     {"cell_type": "code", "source": CODE1, "metadata": {"id": "c3_1"}},
     {"cell_type": "code", "source": CODE2, "metadata": {"id": "c3_2"}},
     {"cell_type": "code", "source": CODE3, "metadata": {"id": "c3_3"}},

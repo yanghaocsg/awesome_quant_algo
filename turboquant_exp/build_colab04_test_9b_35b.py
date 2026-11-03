@@ -15,6 +15,18 @@ MD0 = r'''# Part(3/4) 实际模型测试 — Qwen3.5-9B + 35B-A3B（MMLU 子集 
 
 > 35B 口径：模型权重用官方 FP8（`float8_e4m3fn`）装入 A100-40GB；**TQ/LQ 的量化对象仍是 GDN 循环状态（bf16/fp32 维护）**，FP8 只解决 35B 的显存装载。CPU 内存 < 16GB 时自动跳过 9B/35B，提示改用 0.8B（见 colab_03）。'''
 
+NETCODE = r'''# 网络：AutoDL 等国内环境无法直连 HuggingFace，自动检测并切换镜像（Colab 直连不受影响）
+import os, socket
+def _hf_reachable(host="huggingface.co", port=443, timeout=3):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+if not _hf_reachable():
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+print("HF_ENDPOINT =", os.environ.get("HF_ENDPOINT", "https://huggingface.co (direct)"))'''
+
 CODE1 = r'''import torch, transformers, matplotlib
 print("torch", torch.__version__, "| transformers", transformers.__version__, "| cuda", torch.cuda.is_available())
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,6 +185,7 @@ MD8 = r'''## 小结（Part 3-b：9B / 35B-A3B）
 
 cells = [
     {"cell_type": "markdown", "source": MD0, "metadata": {"id": "c4_0"}},
+    {"cell_type": "code", "source": NETCODE, "metadata": {"id": "c4_0net"}},
     {"cell_type": "code", "source": CODE1, "metadata": {"id": "c4_1"}},
     {"cell_type": "code", "source": CODE2, "metadata": {"id": "c4_2"}},
     {"cell_type": "code", "source": CODE3, "metadata": {"id": "c4_3"}},
