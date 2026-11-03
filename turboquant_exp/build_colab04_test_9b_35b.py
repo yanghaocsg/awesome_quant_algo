@@ -91,35 +91,38 @@ except Exception as e:
     print("GSM8K fallback:", type(e).__name__, e)'''
 
 CODE4 = r'''# 评测函数（小样本；MMLU 用 0-shot 选 A-E，GSM8K 用生成末尾数字）
+import re
 def mmlu_prompt(q):
     s = q["question"] + "\n"
     for i, c in enumerate(q["choices"]):
         s += f"{chr(65+i)}. {c}\n"
     return s + "Answer:"
+# 只在选项字母 token 内取 argmax：全词表 argmax 会被答案前的换行符（id 198）抢占
+LETTER_IDS = [tok.encode(chr(65 + i), add_special_tokens=False)[-1] for i in range(4)]
 def eval_mmlu(model, tok, items):
     ok = tot = 0
     for q in items:
         inp = tok(mmlu_prompt(q), return_tensors="pt").to(DEV)
         with torch.no_grad():
-            logits = model(**inp).logits[:, -1]
-        pred = tok.decode([logits.argmax(-1).item()]).strip()
-        try:
-            if pred.upper() == chr(65 + q["answer"]):
-                ok += 1
-        except Exception:
-            pass
+            logits = model(**inp).logits[0, -1]
+        nch = len(q["choices"])
+        ids = torch.tensor(LETTER_IDS[:nch], device=DEV)
+        choice = int(logits[ids].argmax().item())
+        ok += int(choice == int(q["answer"]))
         tot += 1
     return ok / max(tot, 1)
-def eval_gsm8k(model, tok, items, max_new=32):
+def eval_gsm8k(model, tok, items, max_new=256):
     ok = tot = 0
     for q in items:
         inp = tok(q["question"] + "\nAnswer:", return_tensors="pt").to(DEV)
         with torch.no_grad():
             out = model.generate(**inp, max_new_tokens=max_new, do_sample=False)
         text = tok.decode(out[0][inp["input_ids"].shape[-1]:], skip_special_tokens=True)
-        pred = "".join(ch for ch in text if ch.isdigit()) or "0"
-        gold = "".join(ch for ch in str(q["answer"]) if ch.isdigit())
-        ok += pred == gold
+        nums = re.findall(r"\d+", text)
+        pred = nums[-1] if nums else "0"
+        g = re.findall(r"####\s*(-?[\d,]+)", q["answer"])
+        gold = g[0].replace(",", "") if g else "0"
+        ok += int(pred == gold)
         tot += 1
     return ok / max(tot, 1)
 print("eval funcs ready")'''
