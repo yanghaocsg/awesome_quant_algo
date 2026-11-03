@@ -55,6 +55,11 @@ def mmlu_prompt(q):
     return s + "Answer:"
 
 
+# Restrict the choice to the option-letter tokens (A/B/C/D); the raw vocab argmax is
+# dominated by the newline token the model emits before answering, so do NOT use it.
+LETTER_IDS = [tok.encode(chr(65 + i), add_special_tokens=False)[-1] for i in range(4)]
+
+
 def eval_mmlu(items):
     ok = tot = 0
     detail = []
@@ -62,12 +67,14 @@ def eval_mmlu(items):
         inp = tok(mmlu_prompt(q), return_tensors="pt").to("cuda")
         with torch.no_grad():
             logits = model(**inp).logits[0, -1]
-        pred = tok.decode([logits.argmax().item()]).strip().upper()
-        gold = chr(65 + q["answer"])
-        hit = pred == gold
+        nch = len(q["choices"])
+        ids = torch.tensor(LETTER_IDS[:nch], device="cuda")
+        choice = int(logits[ids].argmax().item())
+        gold = int(q["answer"])
+        hit = choice == gold
         ok += int(hit)
         tot += 1
-        detail.append((gold, pred, int(hit)))
+        detail.append((chr(65 + gold), chr(65 + choice), int(hit)))
     return ok / max(tot, 1), detail
 
 
