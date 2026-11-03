@@ -96,37 +96,36 @@ def turbo_quantize_vec(v):
     q = centers[idx] @ R.T
     return (v - q.reshape(-1)).abs().mean().item()
 def _mgs(m):
+    # 对最后一维（列）正交化，内积与归一化都在倒数第二维（分量）上
     cols = []
     for j in range(m.shape[-1]):
-        v = m[..., j]
+        v = m[..., j:j + 1]
         for _ in range(2):
             for c in cols:
-                v = v - c * (c * v).sum(-1, keepdim=True)
-        cols.append(v / v.norm(dim=-1, keepdim=True).clamp_min(1e-30))
-    return torch.stack(cols, -1)
-def subspace_iteration(s, q0):
-    x = s.transpose(-1, -2)
-    qk = _mgs(x @ q0)
-    qv = _mgs(x.transpose(-1, -2) @ qk)
-    uk = x @ qv
-    return uk.transpose(-1, -2).to(torch.float16), qv.transpose(-1, -2).to(torch.float16)
-def quantize_residual(s, u_new, q_new):
-    e = s - torch.einsum("bhrv,bhrk->bhvk", q_new.float(), u_new.float())
-    sk = e.abs().mean(-2).sqrt().clamp_min(EPS)
-    sv = (e.abs() / sk[..., None, :]).amax(-1).clamp_min(EPS)
-    c = torch.round(e / (sk[..., None, :] * sv[..., :, None]) * QMAX).clamp(-QMAX, QMAX).to(torch.int8)
-    return c, sk, sv
-def lq_compress_mae(svec, Kdim, R=8):
-    """LeapQuant-style per-window compression MAE on a flattened state vector."""
-    V = svec.numel() // Kdim
-    S = svec[: V * Kdim].reshape(V, Kdim)
-    q0 = torch.randn(Kdim, min(R, V), device=svec.device) / Kdim ** 0.5
-    S4 = S.unsqueeze(0).unsqueeze(0)
-    u_new, q_new = subspace_iteration(S4, q0)
-    c, sk, sv = quantize_residual(S4, u_new, q_new)
-    S_re = torch.einsum("bhrv,bhrk->bhvk", q_new.float(), u_new.float()) \
-         + c.float() * (sk[..., None, :] / QMAX) * sv[..., :, None]
-    return (S_re - S4).abs().mean().item()
+                v = v - c * (c * v).sum(-2, keepdim=True)
+        cols.append(v / v.norm(dim=-2, keepdim=True).clamp_min(1e-30))
+    return torch.cat(cols, dim=-1)
+def lq_compress_mae(t, R=8):
+    """LeapQuant-style compression MAE on a state tensor of shape [..., D].
+
+    Reshapes to a matrix M=[n, D], takes an R-rank dominant subspace (power iteration),
+    then int8 smoothed per-row/per-col scales on the residual. Dimension-safe for any n, D.
+    """
+    D = t.shape[-1]
+    M = t.reshape(-1, D).float()
+    n = M.shape[0]
+    Rr = min(R, n, D)
+    q0 = torch.randn(D, Rr, device=M.device) / D ** 0.5
+    qk = _mgs(M @ q0)                       # [n, Rr]
+    qv = _mgs(M.transpose(0, 1) @ qk)       # [D, Rr], orthonormal columns
+    u = M @ qv                              # [n, Rr]
+    low = u @ qv.transpose(0, 1)            # [n, D]
+    e = M - low
+    sk = e.abs().mean(0).sqrt().clamp_min(EPS)            # [D] column scale
+    sv = (e.abs() / sk[None, :]).amax(1).clamp_min(EPS)  # [n] row scale
+    c = torch.round(e / (sk[None, :] * sv[:, None]) * QMAX).clamp(-QMAX, QMAX).to(torch.int8)
+    recon = low + c.float() * (sk[None, :] / QMAX) * sv[:, None]
+    return (recon - M).abs().mean().item()
 print("ops ready: TQ (rotation+Lloyd-Max) and LQ (compensator + smoothed int8 residual)")'''
 
 CODE5 = r'''# 捕获 GDN 状态并做 TQ vs LQ 同口径量化误差对比
@@ -164,10 +163,9 @@ print("captured:", [(i, tuple(t.shape)) for i, t in states[:3]])
 if states:
     rows = []
     for i, (idx, t) in enumerate(states[:3]):
-        Kdim = t.shape[-1]
         svec = t.reshape(-1)
         tq = turbo_quantize_vec(svec)
-        lq = lq_compress_mae(svec, Kdim)
+        lq = lq_compress_mae(t)
         rows.append((idx, tq, lq))
     print("layer | TQ MAE | LQ MAE")
     for idx, tq, lq in rows:
@@ -177,7 +175,7 @@ else:
     torch.manual_seed(0)
     v = torch.randn(4096, device=DEV)
     print("synthetic: TQ MAE", f"{turbo_quantize_vec(v):.3e}",
-          "| LQ MAE", f"{lq_compress_mae(v, 64):.3e}")'''
+          "| LQ MAE", f"{lq_compress_mae(v):.3e}")'''
 
 CODE6 = r'''# 尝试状态注入：替换 cache 内状态张量为量化版本，对比 logits 漂移（不可行则自动降级）
 def try_inject_and_compare():

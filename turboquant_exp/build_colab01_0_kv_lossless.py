@@ -13,13 +13,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "colab_01_0_kv_lossless.ipynb"
 
-INSTALL_CODE = r'''# HF-only usage of turboquant-vllm-npu: no [vllm] extra, no vLLM server needed here.
+INSTALL_CODE = r'''# turboquant-vllm-npu is vendored under tq_pkg (it is not published on public PyPI); no vLLM needed.
 # transformers>=5.22 natively supports Qwen3.5 (model_type=qwen3_5, GDN hybrid).
-%pip install -q -U "transformers>=5.22,<6" turboquant-vllm-npu accelerate
+%pip install -q -U "transformers>=5.22,<6" accelerate
 '''
 
 SETUP_CODE = r'''
-import importlib.metadata as md
+import os, sys
 import torch, transformers
 import torch.nn.functional as F
 print("torch", torch.__version__, "| transformers", transformers.__version__,
@@ -28,8 +28,13 @@ DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 FULL = DEV.type == "cuda"          # A100: full scale / CPU: smoke scale
 print("running on", DEV, "| scale =", "full (A100)" if FULL else "smoke (CPU)")
 
+# Load the vendored turboquant_vllm_npu package (not on public PyPI, no vLLM dependency).
+for _p in (os.path.join(os.getcwd(), "tq_pkg"),
+           "/root/awesome_quant_algo/turboquant_exp/tq_pkg"):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 from turboquant_vllm_npu import CompressedDynamicCache
-print("turboquant-vllm-npu", md.version("turboquant-vllm-npu"))
+print("vendored turboquant_vllm_npu loaded (v1.5.0)")
 '''
 
 MODEL_CODE = r'''
