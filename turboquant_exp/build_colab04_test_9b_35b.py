@@ -162,17 +162,17 @@ CAN_35B = torch.cuda.is_available() and torch.cuda.get_device_properties(0).tota
 PATH35 = resolve_model_path("Qwen/Qwen3.5-35B-A3B-FP8")
 LOCAL35 = os.path.isdir(PATH35)
 model35 = None
-if CAN_35B:
+if CAN_35B and LOCAL35:
     try:
         model35 = AutoModelForCausalLM.from_pretrained(PATH35,
-            torch_dtype=torch.float8_e4m3fn, device_map="auto", local_files_only=LOCAL35)
+            torch_dtype=torch.float8_e4m3fn, device_map="auto", local_files_only=True)
         print("35B FP8 loaded (float8_e4m3fn) | params: %.2f B (%.1f B active)"
               % (sum(p.numel() for p in model35.parameters()) / 1e9, 3))
     except Exception as e:
         print("FP8 load fallback (try bf16 dequant):", type(e).__name__, e)
         try:
             model35 = AutoModelForCausalLM.from_pretrained(PATH35,
-                torch_dtype=torch.bfloat16, device_map="auto", local_files_only=LOCAL35)
+                torch_dtype=torch.bfloat16, device_map="auto", local_files_only=True)
             print("35B loaded as bf16")
         except Exception as e2:
             print("35B load failed:", type(e2).__name__, e2)
@@ -183,8 +183,10 @@ if CAN_35B:
         if gsm:
             res["GSM8K"] = round(eval_gsm8k(model35, tok, gsm), 3)
         print("35B baseline:", res)
+elif not LOCAL35:
+    print("35B skipped: local FP8 model not found, online download of ~37GB disabled")
 else:
-    print("35B skipped: need A100-40GB with >=36GB free VRAM")'''
+    print("35B skipped: need a GPU with >=36GB free VRAM")'''
 
 CODE7 = r'''# 汇总：本实验小样本结果 vs 论文 8-bit 逐模型数据（用户提供口径）
 print("=== 本实验（小样本，Colab A100/CPU） ===")
