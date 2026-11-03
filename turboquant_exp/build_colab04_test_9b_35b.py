@@ -13,7 +13,9 @@ MD0 = r'''# Part(3/4) 实际模型测试 — Qwen3.5-9B + 35B-A3B（MMLU 子集 
 2. GDN 循环状态量化误差对比（TurboQuant 每步 vs LeapQuant 逐窗口，同口径）。
 3. 小样本评测：MMLU 子集（3 个子集 × 5 题）+ GSM8K（8 题）——**口径：小样本趋势复现，非完整基准**。
 
-> 35B 口径：模型权重用官方 FP8（`float8_e4m3fn`）装入 A100-40GB；**TQ/LQ 的量化对象仍是 GDN 循环状态（bf16/fp32 维护）**，FP8 只解决 35B 的显存装载。CPU 内存 < 16GB 时自动跳过 9B/35B，提示改用 0.8B（见 colab_03）。'''
+> 35B 口径：模型权重用官方 FP8（`float8_e4m3fn`）装入 A100-40GB；**TQ/LQ 的量化对象仍是 GDN 循环状态（bf16/fp32 维护）**，FP8 只解决 35B 的显存装载。CPU 内存 < 16GB 时自动跳过 9B/35B，提示改用 0.8B（见 colab_03）。
+>
+> 加载策略：`resolve_model_path` 优先读取数据盘上已下载完整的本地目录（如 AutoDL `/root/autodl-tmp/qwen9b`，强制离线 `local_files_only`），找不到再回退 HF 镜像在线下载，规避在线下载死锁。'''
 
 NETCODE = r'''# 网络：AutoDL 等国内环境无法直连 HuggingFace，自动检测并切换镜像（Colab 直连不受影响）
 import os, socket
@@ -33,20 +35,41 @@ DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     print("GPU:", torch.cuda.get_device_name(0), "| VRAM GB:", round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1))
 import psutil
-print("RAM GB:", round(psutil.virtual_memory().total / 1e9, 1))'''
+print("RAM GB:", round(psutil.virtual_memory().total / 1e9, 1))
 
-CODE2 = r'''# 加载 9B（bf16）；CPU 内存不足时跳过并提示
+# 本地数据盘路径回退：AutoDL 在线下载易死锁，优先用数据盘上已下载完整的模型目录（含 config.json）
+import os
+LOCAL_MODEL_DIRS = {
+    "Qwen/Qwen3.5-9B": ["/root/autodl-tmp/qwen9b", "/root/autodl-tmp/Qwen3.5-9B"],
+    "Qwen/Qwen3.5-35B-A3B-FP8": ["/root/autodl-tmp/qwen35b", "/root/autodl-tmp/Qwen3.5-35B-A3B-FP8"],
+}
+_LOCAL_ROOTS = ["/root/autodl-tmp", "/root/models", os.path.expanduser("~/models")]
+def resolve_model_path(repo_id):
+    name = repo_id.split("/")[-1]
+    cands = list(LOCAL_MODEL_DIRS.get(repo_id, []))
+    cands += [os.path.join(root, name) for root in _LOCAL_ROOTS]
+    for c in cands:
+        if os.path.isdir(c) and os.path.exists(os.path.join(c, "config.json")):
+            print("LOCAL model ->", c)
+            return c
+    print("ONLINE model ->", repo_id)
+    return repo_id'''
+
+CODE2 = r'''# 加载 9B（bf16）；优先数据盘本地目录，否则在线；CPU 内存不足时跳过并提示
 from transformers import AutoModelForCausalLM, AutoTokenizer
 CAN_9B = (torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1e9 >= 32) or psutil.virtual_memory().total / 1e9 >= 40
+PATH9 = resolve_model_path("Qwen/Qwen3.5-9B")
+LOCAL9 = os.path.isdir(PATH9)
 model9 = None
 if CAN_9B:
-    model9 = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-9B",
+    model9 = AutoModelForCausalLM.from_pretrained(PATH9,
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" if torch.cuda.is_available() else None)
+        device_map="auto" if torch.cuda.is_available() else None,
+        local_files_only=LOCAL9)
     print("9B loaded | params: %.2f B" % (sum(p.numel() for p in model9.parameters()) / 1e9))
 else:
     print("SKIP 9B: need A100-40GB (or >=40GB RAM); use colab_03 (0.8B) for CPU path")
-tok = AutoTokenizer.from_pretrained("Qwen/Qwen3.5-9B")'''
+tok = AutoTokenizer.from_pretrained(PATH9, local_files_only=LOCAL9)'''
 
 CODE3 = r'''# 数据：MMLU 子集（3×5 题）+ GSM8K（8 题），在 Colab 内下载
 from datasets import load_dataset
@@ -131,20 +154,22 @@ if model9 is not None:
 else:
     print("9B skipped on this runtime")'''
 
-CODE6 = r'''# 35B-A3B 官方 FP8（W8A8）：加载 + 显存 + 小样本评测
+CODE6 = r'''# 35B-A3B 官方 FP8（W8A8）：加载 + 显存 + 小样本评测；优先数据盘本地目录
 CAN_35B = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory / 1e9 >= 36
+PATH35 = resolve_model_path("Qwen/Qwen3.5-35B-A3B-FP8")
+LOCAL35 = os.path.isdir(PATH35)
 model35 = None
 if CAN_35B:
     try:
-        model35 = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-35B-A3B-FP8",
-            torch_dtype=torch.float8_e4m3fn, device_map="auto")
+        model35 = AutoModelForCausalLM.from_pretrained(PATH35,
+            torch_dtype=torch.float8_e4m3fn, device_map="auto", local_files_only=LOCAL35)
         print("35B FP8 loaded (float8_e4m3fn) | params: %.2f B (%.1f B active)"
               % (sum(p.numel() for p in model35.parameters()) / 1e9, 3))
     except Exception as e:
         print("FP8 load fallback (try bf16 dequant):", type(e).__name__, e)
         try:
-            model35 = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3.5-35B-A3B-FP8",
-                torch_dtype=torch.bfloat16, device_map="auto")
+            model35 = AutoModelForCausalLM.from_pretrained(PATH35,
+                torch_dtype=torch.bfloat16, device_map="auto", local_files_only=LOCAL35)
             print("35B loaded as bf16")
         except Exception as e2:
             print("35B load failed:", type(e2).__name__, e2)
