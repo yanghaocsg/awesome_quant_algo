@@ -29,6 +29,50 @@ updates stay high precision and only the starting point carries quantization
 error. Because no kernel is changed, the M1 path needs only two hooks in the
 engine; the quantizer itself is pure PyTorch.
 
+## Paper equations
+
+The math below follows the paper's notation. The paper keeps the state as
+`S in R^{d_k x d_v}` while the vllm-ascend `ssm_state` is its transpose
+`[..., d_v, d_k]`; the equations are identical, only the axes are swapped.
+
+**Eq. (4) — high-precision updates inside a window.** With window length `p`
+and a quantized boundary state `\hat S_0 = RoundTrip(S_0)`,
+
+$$\tilde S_t = F_t(\tilde S_{t-1}), \quad \tilde S_0 = \hat S_0, \quad t = 1,\dots,p$$
+
+`F_t` is the fp32 recurrent update. Quantization enters only at the window
+start; every in-window step stays high precision. This is why one round-trip
+at the boundary is sufficient.
+
+**Eq. (5) — quantized decomposition of the state.**
+
+$$S \approx K U^\top + R, \qquad R = B\,Q\,C$$
+
+where `Q` is the int8 payload, `B` (`scale_b`) is the per-value (per-row)
+symmetric scale, `C` (`scale_c`) is the per-key (per-column) smoothing, and
+`K U^T` the rank-`r` Compensator Tokens. The encoder subtracts the low-rank
+term first, then quantizes the residual:
+
+$$R = S - K U^\top, \qquad
+Q = \mathrm{clip}\Big(\mathrm{round}\big((R/C)/B\big),\,-127,\,127\big)$$
+
+**Eq. (6) — Compensator Tokens by power iteration.** Each rank-one component
+is the residual's dominant singular direction, found by repeated GEMV with
+normalization, then deflated:
+
+$$u \leftarrow R v,\quad v \leftarrow R^\top u, \qquad
+R \leftarrow R - \sigma\, u v^\top, \quad \sigma = u^\top R v$$
+
+Repeated `r` times to build `K` and `U` (`fit_compensator_tokens`). This
+implementation uses a deterministic warm start instead of a random vector.
+
+**Eq. (7) — reconstruction (decode).**
+
+$$\hat S = (Q \cdot B)\cdot C + K U^\top$$
+
+The int8 payload is scaled back elementwise and the low-rank term is added
+(`decode`).
+
 ## Files
 
 | File | Purpose |
