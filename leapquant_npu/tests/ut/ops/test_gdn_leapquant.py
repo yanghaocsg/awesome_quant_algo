@@ -58,18 +58,20 @@ def test_compensator_reconstruction_rank_is_at_most_r():
     assert torch.linalg.matrix_rank(comp).item() <= spec.compensator_tokens
 
 
-def test_smoothing_balances_row_magnitudes():
+def test_smoothing_balances_column_magnitudes():
     spec = LeapQuantSpec(compensator_tokens=4, smooth=True)
     state = _state(seed=3)
     enc = encode(state, spec)
     raw = state - (enc.comp_k.float() @ enc.comp_u.float().transpose(-1, -2))
     smoothed = raw / enc.scale_c
 
-    def _spread(x):
-        row_max = x.abs().amax(dim=-1)
-        return (row_max / row_max.median()).max().item()
+    def _col_spread(x):
+        # scale_c is one factor per key-column (last axis); measure the
+        # spread of column magnitudes (max over the value axis, dim=-2).
+        col_max = x.abs().amax(dim=-2)
+        return (col_max.max() / col_max.median()).item()
 
-    assert _spread(smoothed) < _spread(raw)
+    assert _col_spread(smoothed) < _col_spread(raw)
 
 
 def test_window_boundary_helpers():

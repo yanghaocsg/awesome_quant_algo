@@ -101,9 +101,13 @@ print(f"  per-window is {mse_ps / max(mse_pw, 1e-30):.1f}x more accurate")
 
 print("=" * 66)
 print("[5] spec validation")
-for bad in (LeapQuantSpec(window=0), LeapQuantSpec(bits=4), LeapQuantSpec(compensator_tokens=-1)):
+for kwargs in (
+    {"window": 0},
+    {"bits": 4},
+    {"compensator_tokens": -1},
+):
     try:
-        bad.__post_init__()
+        LeapQuantSpec(**kwargs)
         print("  FAIL: no error raised")
     except ValueError as e:
         print(f"  ok: {e}")
