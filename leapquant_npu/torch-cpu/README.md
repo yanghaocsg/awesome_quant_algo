@@ -80,6 +80,9 @@ The int8 payload is scaled back elementwise and the low-rank term is added
 | `state.py` | Spec, encoded payload, power iteration, encode/decode/roundtrip, window helpers |
 | `test_state.py` | 10 unit tests (round-trip, rank, smoothing, window logic, GDN simulation) |
 | `verify.py` | 6 smoke checks that print the accuracy numbers |
+| `gdn.md` | GDN recurrent state in plain terms + decode-time inference path |
+| `kda.md` | KDA per-channel variant, same treatment |
+| `deltanet_reading_note.md` | Translation + analysis of the Gated DeltaNet chapter (GatedDeltaNet code, KV-cache vs state arithmetic, layout/semantics cross-check against this backend) |
 | `README.md` | This summary |
 
 ## Run
