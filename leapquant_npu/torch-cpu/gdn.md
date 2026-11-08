@@ -194,3 +194,127 @@ LeapQuant removes by keeping the *payload* 8-bit and only paying fp32 once per
   smoke test), i.e. small but not negligible — dropping `R` costs accuracy
   roughly back to the INT8-only number (`MSE 2.48e-2` → `1.39e-3` with `R=4`
   and smoothing).
+
+---
+
+## Inference-framework view (what a serving engine actually pays)
+
+The section above is the mechanism. This one is the accounting a serving engine
+cares about — cost per token, bytes per sequence, where the crossover sits — and
+it **recomputes** both sides instead of quoting the usual table. Every number
+here is reproducible with `kv_vs_state_arithmetic.py` (same directory).
+
+### Cost per token
+
+| Metric | softmax attention | GDN | What the comparison actually says |
+| --- | --- | --- | --- |
+| prefill FLOPs | `O(T² d)` | `O(T d²)` | GDN wins once `T > d`; for `T < d` the quadratic term is the smaller one |
+| decode FLOPs, per token | `O(T d)`, grows with context | `O(d²)`, constant | asymptotic, not constant-factor: at `T=2048, d=128` a step is ~16× fewer MACs, at `T=128` it is 1× |
+| memory, per layer | `O(T d)` | `H · d²`, independent of `T` | see below — the constant is not small |
+| parallelism over `T` | full | intra-chunk only | a chunkwise kernel is required, see below |
+
+"Linear vs quadratic" without the `d/T` ratio hides which side is smaller at the
+lengths you actually serve.
+
+### Memory: recompute it
+
+`state = H · d² · bytes` per linear layer, `kv = 2 · n_kv · d · bytes` per token
+per attention layer. Crossover (where the two stacks tie):
+
+```
+T* = state_bytes_per_layer / kv_bytes_per_token
+```
+
+For a 1:1 MHA baseline in bf16 that is `d/2 = 64` tokens. GQA and an asymmetric
+head dim both move it:
+
+| geometry | `kv_bytes_per_token` | `T*` |
+| --- | --- | --- |
+| 1:1 MHA, `d=128` both sides, bf16 | 8,192 B | **64** |
+| 16 q / 2 kv, `d_kv=256`, state `d=128`, bf16 | 2,048 B | **256** |
+| same, but LeapQuant int8 state (+conv-4) | 2,048 B | **170** |
+
+Case A uses the middle row: the real Qwen3-Next geometry (`config.json`:
+48 layers, `full_attention_interval = 4`, 16 attention heads / 2 KV heads with
+`head_dim = 256`, 16 linear key heads with key/value `head_dim = 128`,
+`linear_conv_kernel_dim = 4`). 3:1 hybrid = 36 linear + 12 attention, state bf16:
+
+| T | all-attention stack | 3:1 hybrid | ratio | saved |
+| --- | --- | --- | --- | --- |
+| 256 | 24.0 MiB | 24.0 MiB | 1.00× | 0.0% |
+| 2,048 | 192.0 MiB | 66.0 MiB | 2.91× | 65.6% |
+| 8,192 | 768.0 MiB | 210.0 MiB | 3.66× | 72.7% |
+| 32,768 | 3.00 GiB | 786.0 MiB | 3.91× | 74.4% |
+
+Note how much the `d_kv = 256` matters: with the naive `d=128` assumption the
+KV side is half as large and the same stack looks like `T* = 512` — a factor-2
+error in the crossover that changes every "savings" percentage at short T.
+
+Case B — same layers, but 1:1 MHA and a purely linear stack (the head-to-head
+comparison this note's earlier table used, `T* = 64`):
+
+| T | all-attention stack | all-linear stack | ratio |
+| --- | --- | --- | --- |
+| 2,048 | 768.0 MiB | 24.0 MiB | 32× |
+| 8,192 | 3.00 GiB | 24.0 MiB | 128× |
+| 32,768 | 12.00 GiB | 24.0 MiB | 512× |
+
+At **this backend's** geometry (`H=32`, `d_v=d_k=128`, fp32) one state is
+`32 × 128 × 128 × 4 B = 2 MiB` per layer, so 48 layers cost **96 MiB per
+sequence** — not zero. In LeapQuant's checkpoint form (int8 payload + per-key
+`scale_c` + per-value `scale_b` + rank-4 fp16 compensator + kernel-4 conv
+history) it is 0.66 MiB per layer at 32 heads (0.33 MiB at the model's 16),
+**≈3× smaller** either way: ~32 MiB for 48 layers at 32 heads. At the model's
+geometry the crossover for that combination is the 170-row above.
+
+Reproduce:
+
+```bash
+python kv_vs_state_arithmetic.py --state-format bf16 --kv-head-dim 256          # Case A (Qwen3-Next)
+python kv_vs_state_arithmetic.py --all-linear --kv-heads 16 --state-format bf16  # Case B (1:1 MHA)
+python kv_vs_state_arithmetic.py --state-format leapquant --conv-kernel 4 --kv-head-dim 256
+```
+
+### The three engineering bottlenecks, with what this repo actually has
+
+1. **Chunkwise prefill.** A pure `for t` loop cannot feed Tensor Cores; the fix is
+   exact chunkwise form (WY / UT transform) so intra-chunk work becomes matmuls
+   and only the chunk boundary carries `S`. **Our `gdn_torch.py` is not that
+   kernel** — it is a *boundary reconstruction* (rank-`R` compensator + in-window
+   `kbuf`/`ubuf`), which chunks for a different reason: to quantize once per
+   window instead of once per step. Same chunk, different obligation; do not
+   report our flush timings as chunkwise-prefill throughput.
+2. **Varlen.** Real serving needs per-sequence pointers plus `cumsum`,
+   `scaled_dot_kkt`, `solve_tril` style stages so short prompts are not padded.
+   The `torch-cpu` path here is per-sequence batched (`[B, H, L, d]`), no varlen
+   handles; that gap is engine work, not kernel work.
+3. **The crossover.** Below `T*` the fixed state is the *larger* of the two. That
+   is a real effect but it is short: 64 tokens for 1:1 bf16 with `d=128`, 256 at
+   Qwen3-Next's geometry, 170 for the quantized state. The often-quoted
+   "T < 64 or T < 128" is right only for the first case; it misses that a fat KV
+   head dim plus GQA multiplies `T*` by `(q_heads/kv_heads) · (d_kv/d_state)`.
+
+### Claims in circulation that this backend does not support
+
+- **The recurrence form.** A commonly circulated update,
+  `S_t = S_{t-1} ⊙ (I − α_t ⊗ k_tᵀ k_t) + β_t v_tᵀ k_t`, is **not** GDN as
+  implemented here. It puts `α` inside the erase projection and keeps only the
+  write term, dropping the read-and-subtract step that makes the rule a *delta*.
+  The projection form that is equivalent to this file's Eq. above is
+  `S_t = α_t S_{t-1}(I − β_t k_t k_tᵀ) + β_t v_t k_tᵀ` (valid for `‖k‖=1`):
+  `α` outside as a scalar fade, `β` inside as the erase strength. If `α` sits
+  inside the projection, decay and correction no longer factor, and the `p`
+  product in the flush has no meaning.
+- **"75% of layers completely eliminate memory."** They eliminate the *KV cache*
+  (25% of layers still keep one); each linear layer still pays `H · d²` of state.
+  The honest version of the claim is the ratio column above — 74.4% less memory
+  at 32K for the 3:1 hybrid, and *more* memory below 256 tokens.
+- **Model roster.** The 3:1 hybrid is documented for Qwen3-Next in the source
+  chapter. Claims that the same mechanism is the core of other named models
+  (Kimi Linear, "Qwen 3.5") are not established by anything in this repo — check
+  each model's own config before citing it as evidence.
+
+Sources for this section: `kv_vs_state_arithmetic.py` (arithmetic, self-checked
+by bisection against the closed form), the source chapter's 3:1 hybrid, and this
+file's decode section for the recurrence.
+
