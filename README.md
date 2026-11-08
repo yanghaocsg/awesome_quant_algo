@@ -6,6 +6,7 @@ TurboQuant vs LeapQuant: **recurrent-state (Gated-DeltaNet) 8-bit quantization**
 
 - **`turboquant_exp/`** — TurboQuant-based recurrent-state quantization, TurboQuant-vs-LeapQuant comparisons, and Qwen3.5 real-model probes (0.8B / 9B / 35B-A3B, **W8A8-FP8** for 35B). Every notebook ships **CPU + A100 GPU** variants. See `qwen_quant_series_plan.md` for the project plan.
 - **`leapquant_exp/`** — LeapQuant explainers (WeChat / Instagram), HF kernel mirror (`leapquant-kernels/`), pure-PyTorch port (`gdn_torch.py`, `kda_torch.py`), port feasibility study and validation.
+- **`fastkvcomp_paper/`** — Reading notes + paper PDF for *FastKVComp* (NPC 2026, arXiv:2611.04382): KV compression throughput vs compression ratio in disaggregated serving.
 
 ## How to run
 
